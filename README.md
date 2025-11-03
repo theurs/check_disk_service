@@ -91,7 +91,6 @@ DiskMonitorService.exe test
 *   **Start the Service:**
     ```shell
     net start DiskMonitorService
-        Stop the Service:
 
     net stop DiskMonitorService
     ```
