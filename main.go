@@ -449,7 +449,12 @@ func installService(name, desc string) error {
 		return err
 	}
 
-	s, err = m.CreateService(name, exepath, mgr.Config{DisplayName: name, Description: desc})
+	// ИЗМЕНЕНИЕ ЗДЕСЬ: добавлен StartType
+	s, err = m.CreateService(name, exepath, mgr.Config{
+		DisplayName: name,
+		Description: desc,
+		StartType:   mgr.StartAutomatic, // Устанавливаем автоматический запуск
+	})
 	if err != nil {
 		return err
 	}
