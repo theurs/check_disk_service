@@ -156,34 +156,27 @@ func main() {
 			fmt.Printf("Service %s removed successfully.\n", serviceName)
 			log.Printf("Service %s removed successfully.", serviceName)
 			return
-		// --- ОБНОВЛЕННЫЙ БЛОК 'test' ---
 		case "test":
 			fmt.Println("Running a one-time stateful check...")
 			log.Println("Manual test run triggered.")
 
-			// Вызываем основную функцию проверки.
-			// Она сама отправит уведомление, если состояние дисков изменилось.
 			checkDiskStatusAndNotify()
 
-			// После проверки, мы принудительно отправляем сводку о ТЕКУЩЕМ состоянии,
-			// чтобы у пользователя всегда была обратная связь.
 			var summaryMessage string
 			if len(lastErrorState) == 0 {
 				summaryMessage = "✅ Test complete. No active problems found."
 			} else {
-				// Собираем все текущие проблемы в одно сообщение
 				var problems []string
 				for _, problemLine := range lastErrorState {
 					problems = append(problems, problemLine)
 				}
-				summaryMessage = fmt.Sprintf("ℹ️ Test complete. Current active problems:\n\n%s", strings.Join(problems, "\n"))
+				summaryMessage = fmt.Sprintf("ℹ️ Test complete. Current active problems:\n\n`%s`", strings.Join(problems, "`\n`"))
 			}
 			log.Println("Sending test summary notification.")
 			sendTelegramNotification(summaryMessage)
 
 			fmt.Println("Test complete. See log for details.")
 			return
-		// --- КОНЕЦ ОБНОВЛЕНИЙ ---
 		default:
 			log.Fatalf("unknown command: %s", cmd)
 		}
@@ -212,7 +205,6 @@ func (s *Service) Execute(args []string, r <-chan svc.ChangeRequest, changes cha
 
 	done := make(chan struct{})
 
-	// Горутина теперь просто вызывает проверку по тикеру
 	go func() {
 		for {
 			select {
@@ -226,14 +218,13 @@ func (s *Service) Execute(args []string, r <-chan svc.ChangeRequest, changes cha
 
 	log.Println("Service main loop running.")
 
-	// Главный цикл слушает только команды от Windows
 	for c := range r {
 		switch c.Cmd {
 		case svc.Interrogate:
 			changes <- c.CurrentStatus
 		case svc.Stop, svc.Shutdown:
 			log.Printf("%s stopping due to external command", serviceName)
-			close(done) // Останавливаем горутину с тикером
+			close(done)
 			changes <- svc.Status{State: svc.StopPending}
 			return false, 0
 		default:
@@ -245,6 +236,8 @@ func (s *Service) Execute(args []string, r <-chan svc.ChangeRequest, changes cha
 
 // checkDiskStatusAndNotify compares current disk state with the last known state.
 func checkDiskStatusAndNotify() {
+	// --- НАЧАЛО ИЗМЕНЕНИЙ ---
+	// PowerShell скрипт теперь запрашивает MediaType (SSD/HDD) и Wear (износ)
 	psCommand := `
 		$disks = Get-PhysicalDisk;
 		if ($null -eq $disks) { exit 0; }
@@ -253,15 +246,19 @@ func checkDiskStatusAndNotify() {
 				$counters = $disk | Get-StorageReliabilityCounter;
 				$deviceId = $disk.DeviceId;
 				$model = $disk.Model.Trim();
+				$mediaType = $disk.MediaType;
+				$wear = $counters.Wear;
 				$reallocated = $counters.ReallocatedSectors;
 				$pending = $counters.CurrentPendingSectors;
 				$uncorrected = $counters.ReadErrorsUncorrected;
-				Write-Output "Disk[$deviceId]($model) - ReallocatedSectors: $reallocated - PendingSectors: $pending - UncorrectedErrors: $uncorrected";
+				Write-Output "Disk[$deviceId]($model) - MediaType: $mediaType - Wear: $wear - ReallocatedSectors: $reallocated - PendingSectors: $pending - UncorrectedErrors: $uncorrected";
 			} catch {
 				Write-Output "Could not get counters for a disk. Skipping.";
 			}
 		}
 	`
+	// --- КОНЕЦ ИЗМЕНЕНИЙ ---
+
 	cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", psCommand)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 
@@ -269,8 +266,7 @@ func checkDiskStatusAndNotify() {
 	if err != nil {
 		currentErrorMsg := fmt.Sprintf("Failed to run PowerShell command: %v", err)
 		if lastErrorState["powershell_error"] != currentErrorMsg {
-			// --- ИСПРАВЛЕНИЕ ЗДЕСЬ ---
-			log.Println(currentErrorMsg) // Changed from log.Printf
+			log.Println(currentErrorMsg)
 			sendTelegramNotification("⚠️ " + currentErrorMsg)
 			lastErrorState = map[string]string{"powershell_error": currentErrorMsg}
 		}
@@ -278,11 +274,14 @@ func checkDiskStatusAndNotify() {
 	}
 
 	outputStr := string(output)
-	log.Printf("PowerShell check result:\n%s", outputStr) // This Printf is OK because the format string is constant
+	log.Printf("PowerShell check result:\n%s", outputStr)
 
 	currentProblems := make(map[string]string)
-	re := regexp.MustCompile(`(ReallocatedSectors|PendingSectors|UncorrectedErrors):\s*(\d+)`)
-	
+	// --- НАЧАЛО ИЗМЕНЕНИЙ ---
+	// Регулярное выражение теперь ищет и параметр Wear
+	re := regexp.MustCompile(`(ReallocatedSectors|PendingSectors|UncorrectedErrors|Wear):\s*(\d+)`)
+	// --- КОНЕЦ ИЗМЕНЕНИЙ ---
+
 	scanner := bufio.NewScanner(strings.NewReader(outputStr))
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -300,24 +299,31 @@ func checkDiskStatusAndNotify() {
 			currentProblems[diskIdentifier] = line
 		}
 	}
-	
+
 	if !reflect.DeepEqual(currentProblems, lastErrorState) {
 		log.Println("Disk status has changed. Sending notification.")
-		
-		var messageBuilder strings.Builder
-		messageBuilder.WriteString("Disk status has changed!\n\n")
 
+		// --- НАЧАЛО ИЗМЕНЕНИЙ ---
+		// Формирование красивого сообщения с использованием Markdown
+		var messageBuilder strings.Builder
+		messageBuilder.WriteString("Disk health status has changed!\n\n")
+
+		// Проблемы, которые появились или усугубились
 		for disk, problem := range currentProblems {
 			if lastErrorState[disk] != problem {
-				messageBuilder.WriteString(fmt.Sprintf("🔴 NEW/WORSENED: %s\n", problem))
+				messageBuilder.WriteString(fmt.Sprintf("🔴 **Problem Detected/Changed:**\n`%s`\n\n", problem))
 			}
 		}
+
+		// Проблемы, которые были решены
 		for disk := range lastErrorState {
 			if _, exists := currentProblems[disk]; !exists {
-				messageBuilder.WriteString(fmt.Sprintf("🟢 RESOLVED: %s is now OK.\n", disk))
+				// disk здесь это "Disk[id](Model)"
+				messageBuilder.WriteString(fmt.Sprintf("🟢 **Problem Resolved:**\n`%s` is now OK.\n\n", disk))
 			}
 		}
-		
+		// --- КОНЕЦ ИЗМЕНЕНИЙ ---
+
 		sendTelegramNotification(messageBuilder.String())
 		lastErrorState = currentProblems
 	} else {
@@ -332,36 +338,29 @@ func sendTelegramNotification(message string) {
 
 	var err error
 
-	// Цикл повторных отправок
 	for i := 0; i <= maxRetries; i++ {
-		// Попытка отправки
 		if len(fullMessage) > telegramMsgLimit {
 			err = sendTelegramDocument(fullMessage)
 		} else {
 			err = sendTelegramText(fullMessage, false)
 		}
 
-		// Если ошибки нет - всё отлично, выходим из функции
 		if err == nil {
 			log.Println("Telegram notification sent successfully.")
 			return
 		}
 
-		// Если ошибка есть, логируем ее
 		log.Printf("Failed to send notification (attempt %d/%d): %v", i+1, maxRetries+1, err)
 
-		// Если это была последняя попытка, прекращаем
 		if i == maxRetries {
 			break
 		}
 
-		// Рассчитываем экспоненциальную задержку: 5s, 15s, 45s...
 		delay := initialRetryDelay * time.Duration(math.Pow(3, float64(i)))
 		log.Printf("Waiting for %v before retrying...", delay)
 		time.Sleep(delay)
 	}
 
-	// Если мы дошли до сюда, значит все попытки провалились
 	log.Printf("Gave up sending notification after %d attempts.", maxRetries+1)
 }
 
@@ -449,11 +448,10 @@ func installService(name, desc string) error {
 		return err
 	}
 
-	// ИЗМЕНЕНИЕ ЗДЕСЬ: добавлен StartType
 	s, err = m.CreateService(name, exepath, mgr.Config{
 		DisplayName: name,
 		Description: desc,
-		StartType:   mgr.StartAutomatic, // Устанавливаем автоматический запуск
+		StartType:   mgr.StartAutomatic,
 	})
 	if err != nil {
 		return err

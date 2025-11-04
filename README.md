@@ -5,11 +5,12 @@ Disk Monitor Service is a lightweight, background Windows service written in Go 
 ## Key Features
 
 *   **Stateful Alerts**: Avoids alert fatigue by only sending notifications when the disk status *changes*—when a new error appears, an existing one worsens, or an issue is resolved.
-*   **Robust PowerShell-Based Health Checks**: Instead of the limited `wmic` utility, it uses PowerShell's `Get-StorageReliabilityCounter` to track the most reliable predictors of drive failure:
-    *   `ReallocatedSectors`
-    *   `CurrentPendingSectors`
-    *   `ReadErrorsUncorrected`
-*   **Telegram Notifications**: Get instant, informative alerts delivered directly to your Telegram account.
+*   **Robust PowerShell-Based Health Checks**: Instead of the limited `wmic` utility, it uses PowerShell's `Get-StorageReliabilityCounter` to track reliable predictors of drive failure for both HDDs and SSDs:
+    *   **`Wear`** (for SSDs): Tracks the percentage of the drive's lifespan that has been consumed.
+    *   `ReallocatedSectors`: Indicates sectors that have been moved due to read/write errors.
+    *   `CurrentPendingSectors`: "Unstable" sectors awaiting remapping.
+    *   `ReadErrorsUncorrected`: Critical errors that could not be corrected.
+*   **Telegram Notifications**: Get instant, informative alerts with clear Markdown formatting delivered directly to your Telegram account.
 *   **External JSON Configuration**: Easily change your Bot Token and Chat ID in a `config.json` file without recompiling the service.
 *   **Automatic Config Generation**: On its first run, the service automatically creates a `config.json` template for you to fill out.
 *   **Built-in Log Rotation**: Log files are automatically managed (compressed, archived, and deleted) to prevent them from consuming excessive disk space.
@@ -91,7 +92,9 @@ DiskMonitorService.exe test
 *   **Start the Service:**
     ```shell
     net start DiskMonitorService
-
+    ```
+*   **Stop the Service:**
+    ```shell
     net stop DiskMonitorService
     ```
 *   **Remove the Service:**
@@ -121,11 +124,12 @@ The service maintains a log file named `DiskMonitorService.log` in the same dire
 ## Ключевые возможности
 
 *   **Интеллектуальный мониторинг:** Служба отслеживает состояние дисков и отправляет уведомление только тогда, когда статус проблемы **изменяется** (появляется новая, ухудшается старая или проблема исчезает). Это позволяет избежать спама одинаковыми сообщениями.
-*   **Надежная проверка через PowerShell:** Вместо ограниченной утилиты `wmic`, служба использует встроенные возможности PowerShell для получения детальных S.M.A.R.T. атрибутов, таких как:
-    *   `Reallocated Sectors Count` (Переназначенные сектора)
-    *   `Current Pending Sector Count` (Нестабильные сектора)
-    *   `Uncorrectable Sector Count` (Неисправимые ошибки)
-*   **Уведомления в Telegram:** Мгновенное оповещение о проблемах в удобном формате.
+*   **Надежная проверка через PowerShell:** Вместо ограниченной утилиты `wmic`, служба использует PowerShell для получения S.M.A.R.T. атрибутов, которые являются надежными предикторами сбоя как для HDD, так и для SSD:
+    *   **`Wear`** (Износ SSD): Отслеживает процент израсходованного ресурса твердотельного накопителя.
+    *   `Reallocated Sectors Count` (Переназначенные сектора): Сектора, перемещенные из-за ошибок чтения/записи.
+    *   `Current Pending Sector Count` (Нестабильные сектора): "Подозрительные" сектора, ожидающие переназначения.
+    *   `Uncorrectable Sector Count` (Неисправимые ошибки): Критические ошибки, которые не удалось исправить.
+*   **Уведомления в Telegram:** Мгновенное оповещение о проблемах в удобном и наглядном формате (с использованием Markdown).
 *   **Внешний файл конфигурации:** Все настройки (токен бота, ID чата) хранятся в файле `config.json`, что позволяет менять их без пересборки программы.
 *   **Автоматическое создание конфига:** При первом запуске служба сама создаст шаблон `config.json`, который останется только заполнить.
 *   **Ротация логов:** Лог-файл автоматически архивируется и очищается, чтобы не занимать лишнее место на диске.
